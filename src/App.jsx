@@ -197,7 +197,7 @@ function Hub({ progress, isUnlocked, soundOn, onToggleSound, onTitleTap, onSelec
       </div>
       <header className="hub-header">
         <div className="hub-logo" onClick={onTitleTap}>🚀</div>
-        <h1 className="hub-title" onClick={onTitleTap}>시간여행 코드</h1>
+        <h1 className="hub-title" onClick={onTitleTap}>지호코딩</h1>
         <p className="hub-sub">우주선을 코드로 조종해 과거로 떠나자!</p>
       </header>
 
@@ -434,7 +434,7 @@ function SeqStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   return (
     <div>
       <ProgressBar idx={stageIdx} total={total} />
-      <h1 className="big-title" style={{ '--cc': concept.color }}>시간여행 코드</h1>
+      <h1 className="big-title" style={{ '--cc': concept.color }}>지호코딩</h1>
       <div className="stage-name" style={{ color: concept.color }}>{stage.name}</div>
       <Comms text={stage.comms} />
       <div className="game">
@@ -526,7 +526,7 @@ function LoopStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   return (
     <div>
       <ProgressBar idx={stageIdx} total={total} />
-      <h1 className="big-title" style={{ '--cc': concept.color }}>시간여행 코드</h1>
+      <h1 className="big-title" style={{ '--cc': concept.color }}>지호코딩</h1>
       <div className="stage-name" style={{ color: concept.color }}>{stage.name}</div>
       <Comms text={stage.comms} />
       <div className="game">
@@ -642,7 +642,7 @@ function CondStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   return (
     <div>
       <ProgressBar idx={stageIdx} total={total} />
-      <h1 className="big-title" style={{ '--cc': concept.color }}>시간여행 코드</h1>
+      <h1 className="big-title" style={{ '--cc': concept.color }}>지호코딩</h1>
       <div className="stage-name" style={{ color: concept.color }}>{stage.name}</div>
       <Comms text={stage.comms} />
       <div className="game">
@@ -768,7 +768,7 @@ function VarStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   return (
     <div>
       <ProgressBar idx={stageIdx} total={total} />
-      <h1 className="big-title" style={{ '--cc': concept.color }}>시간여행 코드</h1>
+      <h1 className="big-title" style={{ '--cc': concept.color }}>지호코딩</h1>
       <div className="stage-name" style={{ color: concept.color }}>{stage.name}</div>
       <Comms text={stage.comms} />
       <div className="game">

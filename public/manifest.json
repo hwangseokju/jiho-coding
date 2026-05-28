@@ -1,13 +1,13 @@
 {
-  "name": "코딩 모험가",
-  "short_name": "코딩모험가",
-  "description": "역사 테마로 떠나는 코딩 여정",
+  "name": "지호코딩",
+  "short_name": "지호코딩",
+  "description": "우주선을 코드로 조종해 과거로 떠나는 코딩 학습 게임",
   "start_url": "/jiho-coding/",
   "scope": "/jiho-coding/",
   "display": "standalone",
   "orientation": "any",
-  "theme_color": "#1a3a3a",
-  "background_color": "#e8d4a8",
+  "theme_color": "#0d1b3a",
+  "background_color": "#050818",
   "icons": [
     {
       "src": "/jiho-coding/icon-192.png",
