@@ -1,0 +1,23 @@
+{
+  "name": "코딩 모험가",
+  "short_name": "코딩모험가",
+  "description": "역사 테마로 떠나는 코딩 여정",
+  "start_url": "/jiho-coding/",
+  "scope": "/jiho-coding/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1a3a3a",
+  "background_color": "#e8d4a8",
+  "icons": [
+    {
+      "src": "/jiho-coding/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/jiho-coding/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
