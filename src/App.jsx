@@ -7,13 +7,34 @@ import { BLOCKS, CONCEPTS } from './stages.js';
 // ============================================
 
 const STORAGE_KEY = 'jiho-coding-progress-v1';
-const DEFAULT_PROGRESS = { seq:{mastered:false}, loop:{mastered:false}, cond:{mastered:false}, var:{mastered:false} };
+// stars: { 'seq-0': 3, 'seq-1': 2, ... } 스테이지별 별점(1~3)
+// badges: ['perfect_concept', 'no_hint', ...] 획득 배지 id
+const DEFAULT_PROGRESS = {
+  seq:{mastered:false}, loop:{mastered:false}, cond:{mastered:false}, var:{mastered:false},
+  stars:{}, badges:[],
+};
 
 function loadProgress() {
   try { const r = localStorage.getItem(STORAGE_KEY); if (!r) return DEFAULT_PROGRESS; return { ...DEFAULT_PROGRESS, ...JSON.parse(r) }; }
   catch { return DEFAULT_PROGRESS; }
 }
 function saveProgress(p) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch {} }
+
+// 틀린 횟수 → 별점 (힌트는 안 깎음)
+function calcStars(wrong) { return wrong === 0 ? 3 : wrong <= 2 ? 2 : 1; }
+
+// 배지 정의
+const BADGES = {
+  first_clear:   { ico:'🎯', name:'첫 발사',     desc:'첫 스테이지 클리어' },
+  first_master:  { ico:'🏆', name:'첫 마스터',   desc:'개념 하나를 마스터' },
+  all_master:    { ico:'👑', name:'코딩 마스터', desc:'4개 개념 모두 마스터' },
+  perfect_stage: { ico:'⭐', name:'완벽한 도약', desc:'별 3개로 클리어' },
+  no_hint_master:{ ico:'🧠', name:'스스로 척척', desc:'힌트 없이 한 개념 마스터' },
+  star_10:       { ico:'✨', name:'별 수집가',   desc:'별 10개 모으기' },
+  star_50:       { ico:'🌟', name:'별 부자',     desc:'별 50개 모으기' },
+  trap_master:   { ico:'🛡️', name:'함정 탐정',   desc:'함정 스테이지 별 3개' },
+};
+const TOTAL_STARS = 32 * 3; // 32스테이지 × 최대 3별
 
 // ===== 효과음 (Web Audio) =====
 const Sound = {
@@ -94,8 +115,8 @@ export default function App() {
       adminTimer.current = setTimeout(() => setAdminTaps(0), 2000);
       if (n >= 5) {
         const allDone = CONCEPTS.every(c => progress[c.id].mastered);
-        if (allDone) { if (confirm('관리자: 모든 진행을 초기화할까요?')) setProgress(DEFAULT_PROGRESS); }
-        else { if (confirm('관리자: 전체 해금할까요?')) { const np = {}; CONCEPTS.forEach(c => np[c.id] = { mastered: true }); setProgress(np); } }
+        if (allDone) { if (confirm('관리자: 모든 진행을 초기화할까요? (별·배지 포함)')) setProgress(DEFAULT_PROGRESS); }
+        else { if (confirm('관리자: 전체 해금할까요?')) { setProgress(prev => { const np = { ...prev }; CONCEPTS.forEach(c => np[c.id] = { mastered: true }); return np; }); } }
         return 0;
       }
       return n;
@@ -103,6 +124,37 @@ export default function App() {
   };
 
   const masterConcept = (id) => setProgress(prev => ({ ...prev, [id]: { mastered: true } }));
+
+  // 스테이지 클리어 시 별점 기록 (기존보다 높은 별만 갱신) + 배지 체크
+  const recordStar = (conceptId, stageIdx, wrong, stage) => {
+    setProgress(prev => {
+      const key = `${conceptId}-${stageIdx}`;
+      const stars = calcStars(wrong);
+      const prevStars = prev.stars[key] || 0;
+      const newStars = { ...prev.stars, [key]: Math.max(prevStars, stars) };
+      const totalStars = Object.values(newStars).reduce((a, b) => a + b, 0);
+      const badges = new Set(prev.badges);
+      // 배지 판정
+      badges.add('first_clear');
+      if (stars === 3) badges.add('perfect_stage');
+      if (stars === 3 && stage && (stage.palette || []).some(k => BLOCKS[k]?.trap)) badges.add('trap_master');
+      if (totalStars >= 10) badges.add('star_10');
+      if (totalStars >= 50) badges.add('star_50');
+      return { ...prev, stars: newStars, badges: [...badges] };
+    });
+  };
+
+  // 개념 마스터 시 배지
+  const recordMasterBadges = (conceptId, usedHintInConcept) => {
+    setProgress(prev => {
+      const badges = new Set(prev.badges);
+      badges.add('first_master');
+      if (!usedHintInConcept) badges.add('no_hint_master');
+      const afterMaster = { ...prev, [conceptId]: { mastered: true } };
+      if (CONCEPTS.every(c => afterMaster[c.id]?.mastered)) badges.add('all_master');
+      return { ...prev, badges: [...badges] };
+    });
+  };
 
   return (
     <div className="app-root">
@@ -116,10 +168,11 @@ export default function App() {
           onSelect={(c) => { Sound.click(); setActiveConcept(c); setScreen('concept'); }} />
       )}
       {screen === 'concept' && activeConcept && (
-        <ConceptPlayer concept={activeConcept} soundOn={soundOn}
+        <ConceptPlayer concept={activeConcept} soundOn={soundOn} progress={progress}
           onToggleSound={() => { setSoundOn(s => !s); Sound.click(); }}
           onBack={() => { Sound.click(); setScreen('hub'); }}
-          onMaster={() => masterConcept(activeConcept.id)} />
+          onRecordStar={recordStar}
+          onMaster={(usedHint) => recordMasterBadges(activeConcept.id, usedHint)} />
       )}
     </div>
   );
@@ -127,6 +180,15 @@ export default function App() {
 
 // ===== 허브 (4개념 선택) =====
 function Hub({ progress, isUnlocked, soundOn, onToggleSound, onTitleTap, onSelect }) {
+  const totalStars = Object.values(progress.stars || {}).reduce((a, b) => a + b, 0);
+  const earnedBadges = progress.badges || [];
+  const [showBadges, setShowBadges] = useState(false);
+
+  // 개념별 획득 별 (8스테이지 합)
+  const conceptStars = (cid) => {
+    let s = 0; for (let i = 0; i < 8; i++) s += (progress.stars || {})[`${cid}-${i}`] || 0; return s;
+  };
+
   return (
     <div className="hub">
       <div className="hud">
@@ -138,15 +200,36 @@ function Hub({ progress, isUnlocked, soundOn, onToggleSound, onTitleTap, onSelec
         <h1 className="hub-title" onClick={onTitleTap}>시간여행 코드</h1>
         <p className="hub-sub">우주선을 코드로 조종해 과거로 떠나자!</p>
       </header>
+
+      {/* 대시보드 */}
+      <div className="dashboard">
+        <div className="dash-item">
+          <div className="dash-big">⭐ {totalStars}<span className="dash-small">/ {TOTAL_STARS}</span></div>
+          <div className="dash-label">모은 별</div>
+        </div>
+        <div className="dash-bar-wrap">
+          <div className="dash-bar"><div className="dash-fill" style={{ width: (totalStars / TOTAL_STARS * 100) + '%' }} /></div>
+          <div className="dash-label">전체 진행률 {Math.round(totalStars / TOTAL_STARS * 100)}%</div>
+        </div>
+        <div className="dash-item dash-badge-btn" onClick={() => { Sound.click(); setShowBadges(true); }}>
+          <div className="dash-big">🏅 {earnedBadges.length}<span className="dash-small">/ {Object.keys(BADGES).length}</span></div>
+          <div className="dash-label">배지 보기</div>
+        </div>
+      </div>
+
       <div className="concept-grid">
         {CONCEPTS.map((c, idx) => {
           const unlocked = isUnlocked(idx);
           const mastered = progress[c.id].mastered;
+          const cs = conceptStars(c.id);
           return (
             <div key={c.id} className={`concept-card ${unlocked ? '' : 'locked'} ${mastered ? 'mastered' : ''}`}
               style={{ '--cc': c.color }}
               onClick={() => unlocked && onSelect(c)}>
-              <div className="cc-num">개념 {idx + 1}</div>
+              <div className="cc-top">
+                <span className="cc-num">개념 {idx + 1}</span>
+                {unlocked && cs > 0 && <span className="cc-stars">⭐ {cs}/24</span>}
+              </div>
               <div className="cc-ico">{c.ico}</div>
               <h2 className="cc-title">{c.title}</h2>
               <p className="cc-sub">{c.subtitle}</p>
@@ -161,6 +244,28 @@ function Hub({ progress, isUnlocked, soundOn, onToggleSound, onTitleTap, onSelec
         })}
       </div>
       <footer className="hub-foot">v1.0 · 순차 · 반복 · 조건 · 변수</footer>
+
+      {/* 배지 모달 */}
+      {showBadges && (
+        <div className="modal-bg show" onClick={() => setShowBadges(false)}>
+          <div className="modal badge-modal" onClick={e => e.stopPropagation()}>
+            <h2>🏅 배지 도감</h2>
+            <div className="badge-grid">
+              {Object.entries(BADGES).map(([id, b]) => {
+                const got = earnedBadges.includes(id);
+                return (
+                  <div key={id} className={`badge-item ${got ? 'got' : ''}`}>
+                    <div className="badge-ico">{got ? b.ico : '🔒'}</div>
+                    <div className="badge-name">{b.name}</div>
+                    <div className="badge-desc">{got ? b.desc : '???'}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="next" onClick={() => { Sound.click(); setShowBadges(false); }}>닫기</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -170,10 +275,11 @@ function Hub({ progress, isUnlocked, soundOn, onToggleSound, onTitleTap, onSelec
 // ============================================
 // ConceptPlayer: 한 개념의 8스테이지 + 퀴즈 진행
 // ============================================
-function ConceptPlayer({ concept, soundOn, onToggleSound, onBack, onMaster }) {
+function ConceptPlayer({ concept, soundOn, progress, onToggleSound, onBack, onRecordStar, onMaster }) {
   const [phase, setPhase] = useState('stage'); // stage | quiz
   const [stageIdx, setStageIdx] = useState(0);
-  const [modal, setModal] = useState(null); // {badge,title,html,onNext,trophy}
+  const [modal, setModal] = useState(null);
+  const usedHintRef = useRef(false); // 이 개념 진행 중 힌트를 한 번이라도 썼는지
 
   const stages = concept.stages;
   const total = stages.length;
@@ -189,17 +295,30 @@ function ConceptPlayer({ concept, soundOn, onToggleSound, onBack, onMaster }) {
     return `<div class="review-card"><div class="rv-label">📖 방금 쓴 명령, 코딩에선 이렇게 불러요</div>${rows.join('')}</div>`;
   };
 
-  const onStageClear = (answerKeys) => {
+  const starHtml = (wrong) => {
+    const s = calcStars(wrong);
+    const full = '⭐'.repeat(s); const empty = '☆'.repeat(3 - s);
+    const msg = s === 3 ? '완벽해요! 한 번에 성공!' : s === 2 ? '잘했어요!' : '클리어! 다음엔 별 3개 도전!';
+    return `<div class="star-result"><div class="star-row">${full}${empty}</div><div class="star-msg">${msg}</div></div>`;
+  };
+
+  // onClear가 (answerKeys, wrong, stage)를 받음
+  const onStageClear = (answerKeys, wrong, stage) => {
+    if (usedHint()) {} // no-op
+    onRecordStar(concept.id, stageIdx, wrong, stage);
     if (stageIdx < total - 1) {
-      setModal({ badge: '🎖️', title: '스테이지 클리어!', html: `<b>잘했어요!</b> ${stages[stageIdx].name} 통과!${reviewCard(answerKeys)}`, onNext: () => { setModal(null); setStageIdx(stageIdx + 1); } });
+      setModal({ badge: '🎖️', title: '스테이지 클리어!', html: `${starHtml(wrong)}<b>${stages[stageIdx].name}</b> 통과!${reviewCard(answerKeys)}`, onNext: () => { setModal(null); setStageIdx(stageIdx + 1); } });
     } else {
-      setModal({ badge: '📚', title: `${concept.title} 8단계 완주!`, html: `<b>대단해요!</b>${reviewCard(answerKeys)}<br>이제 마지막 <b>복습 퀴즈</b>를 풀면 "${concept.title} 마스터" 메달을 받아요!`, onNext: () => { setModal(null); setPhase('quiz'); } });
+      setModal({ badge: '📚', title: `${concept.title} 8단계 완주!`, html: `${starHtml(wrong)}<b>대단해요!</b>${reviewCard(answerKeys)}<br>이제 마지막 <b>복습 퀴즈</b>를 풀면 "${concept.title} 마스터" 메달을 받아요!`, onNext: () => { setModal(null); setPhase('quiz'); } });
     }
   };
 
+  const usedHint = () => usedHintRef.current;
+  const markHintUsed = () => { usedHintRef.current = true; };
+
   const onQuizDone = (score, passLine) => {
     const pass = score >= passLine;
-    if (pass) { masterCelebration(); confettiBurst(); onMaster(); }
+    if (pass) { masterCelebration(); confettiBurst(); onMaster(!usedHintRef.current); }
     setModal({
       badge: pass ? '🏆' : '📖', trophy: pass,
       title: pass ? `${concept.title} 마스터 달성!` : '조금 더 복습해요',
@@ -218,7 +337,7 @@ function ConceptPlayer({ concept, soundOn, onToggleSound, onBack, onMaster }) {
       </div>
 
       {phase === 'stage' && (
-        <StageRouter key={stageIdx} concept={concept} stageIdx={stageIdx} total={total} onClear={onStageClear} />
+        <StageRouter key={stageIdx} concept={concept} stageIdx={stageIdx} total={total} onClear={onStageClear} onHintUsed={markHintUsed} stars={progress.stars} />
       )}
       {(phase === 'quiz' || phase === 'quiz-retry') && (
         <Quiz key={phase} concept={concept} onDone={onQuizDone} />
@@ -244,9 +363,9 @@ function ProgressBar({ idx, total, label }) {
 }
 
 // 스테이지 타입별 라우팅
-function StageRouter({ concept, stageIdx, total, onClear }) {
+function StageRouter({ concept, stageIdx, total, onClear, onHintUsed }) {
   const s = concept.stages[stageIdx];
-  const common = { concept, stage: s, stageIdx, total, onClear };
+  const common = { concept, stage: s, stageIdx, total, onClear, onHintUsed };
   if (concept.type === 'seq') return <SeqStage {...common} />;
   if (concept.type === 'loop') return <LoopStage {...common} />;
   if (concept.type === 'cond') return <CondStage {...common} />;
@@ -259,7 +378,7 @@ function StageRouter({ concept, stageIdx, total, onClear }) {
 // ============================================
 // 순차 엔진
 // ============================================
-function SeqStage({ concept, stage, stageIdx, total, onClear }) {
+function SeqStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   const [placed, setPlaced] = useState([]);
   const [running, setRunning] = useState(false);
   const [execIdx, setExecIdx] = useState(-1);
@@ -298,7 +417,7 @@ function SeqStage({ concept, stage, stageIdx, total, onClear }) {
       else { setStatus('🚀 발사!'); setAnim('lift-warp'); }
       Sound.launch(); await wait(1200);
       setShowEra(true); Sound.success(); confettiBurst(); await wait(1400);
-      onClear(stage.answer);
+      onClear(stage.answer, wrong, stage);
     } else {
       setWrong(w => w + 1); Sound.fail(); setStatus('💥 실패!');
       let msg = '😢 임무 실패! ';
@@ -331,7 +450,7 @@ function SeqStage({ concept, stage, stageIdx, total, onClear }) {
           </Panel>
         </div>
       </div>
-      <Controls onHint={() => { Sound.click(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={placed.length > 0} />
+      <Controls onHint={() => { Sound.click(); if (onHintUsed) onHintUsed(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={placed.length > 0} />
       {showHint && <div className="hint">💡 {stage.hint}</div>}
       {fail && <div className="fail-msg">{fail}</div>}
     </div>
@@ -341,7 +460,7 @@ function SeqStage({ concept, stage, stageIdx, total, onClear }) {
 // ============================================
 // 반복 엔진 (중첩 블록)
 // ============================================
-function LoopStage({ concept, stage, stageIdx, total, onClear }) {
+function LoopStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   // 구조: outer(반복 밖, outerFirst면 앞) + loop{times, body[]}
   const [outerBlocks, setOuterBlocks] = useState([]); // 반복 밖 명령
   const [loopMade, setLoopMade] = useState(false);
@@ -386,7 +505,7 @@ function LoopStage({ concept, stage, stageIdx, total, onClear }) {
     if (correct) {
       setStatus('🚀 발사!'); setAnim('lift-warp'); setFlame(1); Sound.launch(); await wait(1200);
       setShowEra(true); Sound.success(); confettiBurst(); await wait(1400);
-      onClear([...(stage.outer || []), ...stage.loopBody]);
+      onClear([...(stage.outer || []), ...stage.loopBody], wrong, stage);
     } else {
       setWrong(w => w + 1); Sound.fail(); setStatus('💥 실패!');
       let msg = '😢 임무 실패! ';
@@ -442,7 +561,7 @@ function LoopStage({ concept, stage, stageIdx, total, onClear }) {
           </Panel>
         </div>
       </div>
-      <Controls onHint={() => { Sound.click(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={loopMade || outerBlocks.length > 0} />
+      <Controls onHint={() => { Sound.click(); if (onHintUsed) onHintUsed(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={loopMade || outerBlocks.length > 0} />
       {showHint && <div className="hint">💡 {stage.hint}</div>}
       {fail && <div className="fail-msg">{fail}</div>}
     </div>
@@ -463,7 +582,7 @@ function makeShuffled(stage) {
 // ============================================
 // 조건 엔진 (만약~라면~아니면)
 // ============================================
-function CondStage({ concept, stage, stageIdx, total, onClear }) {
+function CondStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   const [thenAct, setThenAct] = useState(null);
   const [elseAct, setElseAct] = useState(null);
   const [running, setRunning] = useState(false);
@@ -504,7 +623,7 @@ function CondStage({ concept, stage, stageIdx, total, onClear }) {
     const allOk = res.every(r => r);
     if (allOk) {
       setStatus('✅ 모든 상황 완벽 대응!'); Sound.success(); confettiBurst(); setShowEra(true); await wait(1600);
-      onClear([stage.thenAns, stage.elseAns]);
+      onClear([stage.thenAns, stage.elseAns], wrong, stage);
     } else {
       setWrong(w => w + 1); Sound.fail(); setStatus('💥 일부 상황 실패');
       let msg = '😢 일부 상황에서 잘못 대응했어요. ';
@@ -563,7 +682,7 @@ function CondStage({ concept, stage, stageIdx, total, onClear }) {
           </Panel>
         </div>
       </div>
-      <Controls onHint={() => { Sound.click(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={!!(thenAct && elseAct)} runLabel="▶ 상황 실행" />
+      <Controls onHint={() => { Sound.click(); if (onHintUsed) onHintUsed(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={!!(thenAct && elseAct)} runLabel="▶ 상황 실행" />
       {showHint && <div className="hint">💡 {stage.hint}</div>}
       {fail && <div className="fail-msg">{fail}</div>}
     </div>
@@ -573,7 +692,7 @@ function CondStage({ concept, stage, stageIdx, total, onClear }) {
 // ============================================
 // 변수 엔진 (게이지 관리) - before/loop/after 3영역 구조
 // ============================================
-function VarStage({ concept, stage, stageIdx, total, onClear }) {
+function VarStage({ concept, stage, stageIdx, total, onClear, onHintUsed }) {
   // 프로그램 영역: before(반복 앞) / loopBody(반복 안) / after(반복 뒤)
   // useLoop 아니면 before만 평면 시퀀스로 사용
   const [before, setBefore] = useState([]);
@@ -628,7 +747,7 @@ function VarStage({ concept, stage, stageIdx, total, onClear }) {
     const correct = !usedTrap && !earlyError && inited && f === stage.target;
     if (correct) {
       setStatus(`🎯 연료 ${stage.target} 달성!`); Sound.launch(); confettiBurst(); setShowEra(true); await wait(1500);
-      onClear([...before, ...(loopMade ? loopBody : []), ...after]);
+      onClear([...before, ...(loopMade ? loopBody : []), ...after], wrong, stage);
     } else {
       setWrong(w => w + 1); Sound.fail();
       let msg = '😢 실패! ';
@@ -690,7 +809,7 @@ function VarStage({ concept, stage, stageIdx, total, onClear }) {
           </Panel>
         </div>
       </div>
-      <Controls onHint={() => { Sound.click(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={totalCount > 0 || loopMade} runLabel="▶ 실행" />
+      <Controls onHint={() => { Sound.click(); if (onHintUsed) onHintUsed(); setShowHint(h => !h); }} onReset={reset} onRun={run} running={running} canRun={totalCount > 0 || loopMade} runLabel="▶ 실행" />
       {showHint && <div className="hint">💡 {stage.hint}</div>}
       {fail && <div className="fail-msg">{fail}</div>}
     </div>
@@ -853,6 +972,38 @@ const STYLES = `
 .cc-done { color:var(--gold); font-weight:bold; }
 .cc-go { color:var(--cc); font-weight:bold; }
 .hub-foot { text-align:center; color:#678; font-size:12px; margin-top:24px; }
+
+/* 대시보드 */
+.dashboard { display:flex; align-items:center; justify-content:center; gap:18px; flex-wrap:wrap; margin:0 auto 22px; max-width:680px; background:var(--panel); border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:16px 20px; backdrop-filter:blur(8px); }
+.dash-item { text-align:center; }
+.dash-big { font-family:'Orbitron',sans-serif; font-weight:800; font-size:24px; color:var(--gold); }
+.dash-small { font-size:13px; color:#789; margin-left:4px; }
+.dash-label { font-size:12px; color:#9ab; margin-top:2px; }
+.dash-bar-wrap { flex:1; min-width:160px; }
+.dash-bar { height:12px; background:rgba(255,255,255,.1); border-radius:8px; overflow:hidden; }
+.dash-fill { height:100%; background:linear-gradient(90deg,var(--cyan),var(--green)); transition:width .5s; }
+.dash-badge-btn { cursor:pointer; padding:6px 10px; border-radius:10px; transition:.15s; }
+.dash-badge-btn:hover { background:rgba(255,255,255,.08); }
+
+/* 카드 별점 */
+.cc-top { display:flex; justify-content:space-between; align-items:center; }
+.cc-stars { font-size:12px; color:var(--gold); font-weight:bold; }
+
+/* 별 결과 (모달) */
+.star-result { text-align:center; margin-bottom:12px; }
+.star-row { font-size:40px; letter-spacing:6px; animation:starsPop .6s cubic-bezier(.34,1.56,.64,1); }
+@keyframes starsPop { from{transform:scale(0)} to{transform:scale(1)} }
+.star-msg { font-size:14px; color:var(--gold); margin-top:4px; font-weight:bold; }
+
+/* 배지 모달 */
+.badge-modal { max-width:520px; }
+.badge-modal h2 { font-family:'Orbitron',sans-serif; color:var(--gold); margin-bottom:16px; }
+.badge-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:12px; margin-bottom:16px; }
+.badge-item { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:14px 8px; text-align:center; opacity:.5; }
+.badge-item.got { opacity:1; border-color:var(--gold); box-shadow:0 0 14px rgba(255,210,63,.3); background:rgba(255,210,63,.08); }
+.badge-ico { font-size:32px; }
+.badge-name { font-size:13px; font-weight:bold; margin-top:6px; color:#e8f0ff; }
+.badge-desc { font-size:11px; color:#9ab; margin-top:3px; line-height:1.3; }
 
 /* 개념 플레이어 */
 .concept-player { position:relative; z-index:1; max-width:1100px; margin:0 auto; padding:0 16px 30px; }
